@@ -158,4 +158,4 @@ $$ \text{likelihood} = \prod_{i=1}^n  p_{\theta} (x_i) $${#eq:8}
 Mi is ez? Nem más mint, hogy a *megfigyelt adatunk mekkora valószínűséggel származik a $$\theta$$ paraméterű eloszlásból*.^[Persze ennek eredménye nem 0 és 1 közötti, mert hiányzik a normalizációs faktor: a Teljes valószínűség tétele.  Így meg is érkeztünk a Bayes tételhez nagyjából.]  Ennek a maximuma meg az a paraméter, ami legnagyobb valószínűséggel magyarázza a megfigyelést.  Ami logikusan az a paraméter is ahol a legkisebb a valós paraméter és a becslésünk távolsága. 
 
 #### Rekrám
-A bejegyzés az ingyenes valós idejű közös munkát támogató online [μr² Markdown szerkesztővel](https://mur2.co.uk/editor) készült. 
+A bejegyzés az ingyenes valós idejű közös munkát támogató online [μr² Markdown szerkesztővel](https://mur2.co.uk/editor) készült. A Markdown változat letölthető [innen](https://github.com/sajozsattila/blog/blob/master/Markdown/eloszlasok_tavolsaga.md).
