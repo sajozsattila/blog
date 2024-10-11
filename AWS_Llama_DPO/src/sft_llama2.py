@@ -19,7 +19,7 @@ from typing import Optional
 
 import torch
 from accelerate import Accelerator
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from peft import AutoPeftModelForCausalLM, LoraConfig
 from tqdm import tqdm
 from transformers import (
@@ -115,14 +115,18 @@ def prepare_sample_text(example):
 
 
 def create_datasets(tokenizer, args, seed=None):
-    dataset = load_dataset(
-        args.dataset_name,
-        data_dir=args.subset,
-        split=args.split,
-        use_auth_token=True,
-        num_proc=args.num_workers if not args.streaming else None,
-        streaming=args.streaming,
-    )
+    if 's3://' in args.dataset_name:
+        dataset = load_from_disk(args.dataset_name)
+        args.streamin = False
+    else:
+        dataset = load_dataset(
+            args.dataset_name,
+            data_dir=args.subset,
+            split=args.split,
+            use_auth_token=True,
+            num_proc=args.num_workers if not args.streaming else None,
+            streaming=args.streaming,
+        )
     if args.streaming:
         print("Loading the dataset in streaming mode")
         valid_data = dataset.take(args.size_valid_set)
