@@ -41,7 +41,9 @@ if __name__ == "__main__":
         "--fp16", "True",
         "--remove_unused_columns", "False",
         "--run_name", "sft_llama2",
-        "--report_to", "none"   # disable WanDB
+        "--report_to", "none",              # disable WanDB
+        "--dataset_name", args.dataset_path # s3 location of the training data
+        "--streaming", "False"              # for s3 data we do not stream
     ]
     subprocess.call(training_command)
 
