@@ -51,6 +51,7 @@ class ScriptArguments:
     warmup_steps: Optional[int] = field(default=100, metadata={"help": "the number of warmup steps"})
     weight_decay: Optional[float] = field(default=0.05, metadata={"help": "the weight decay"})
     optimizer_type: Optional[str] = field(default="paged_adamw_32bit", metadata={"help": "the optimizer type"})
+    dataset_name: Optional[str] = field(default="lvwerra/stack-exchange-paired", metadata={"help": "the dataset name"})
 
     per_device_train_batch_size: Optional[int] = field(default=4, metadata={"help": "train batch size per device"})
     per_device_eval_batch_size: Optional[int] = field(default=1, metadata={"help": "eval batch size per device"})
@@ -106,12 +107,15 @@ class ScriptArguments:
     )
 
 
-def get_stack_exchange_paired(
+def get_data(
+    dataset_name: str,
+    dataset_type: str = "train",
     data_dir: str = "data/rl",
     cache_dir: Optional[str] = None,
     num_proc=24,
 ) -> Dataset:
-    """Load the stack-exchange-paired dataset from Hugging Face and convert it to the necessary format.
+    """
+    Load the and convert it to the necessary format.
 
     The dataset is converted to a dictionary with the following structure:
     {
@@ -123,13 +127,21 @@ def get_stack_exchange_paired(
     Prompts are structured as follows:
       "Question: " + <prompt> + "\n\nAnswer: "
     """
-    dataset = load_dataset(
-        "lvwerra/stack-exchange-paired",
-        split="train",
-        cache_dir=cache_dir,
-        data_dir=data_dir,
-        verification_mode="no_checks",
-    )
+    if 's3://' in dataset_name:
+        dataset = load_from_disk(dataset_name)
+        dataset = dataset.train_test_split(test_size=0.005)
+        if dataset_type == "train":
+            dataset = dataset["train"]
+        else:
+            dataset = dataset["test"]
+    else:
+        dataset = load_dataset(
+            dataset_name,
+            split="train",
+            cache_dir=cache_dir,
+            data_dir=data_dir,
+            verification_mode="no_checks",
+       )
     original_columns = dataset.column_names
 
     def return_prompt_and_responses(samples) -> Dict[str, str]:
@@ -179,9 +191,13 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
     tokenizer.pad_token = tokenizer.eos_token
 
-    # 2. Load the Stack-exchange paired dataset
+    # 2. Load the dataset
     # in AWS we need to set cache_dir as the user home is not mounted to EBS
-    train_dataset = get_stack_exchange_paired(data_dir="data/rl", cache_dir="/opt/ml/input")
+    train_dataset = get_data(
+        dataset_name = script_args.dataset_name,
+        data_dir="data/rl", 
+        cache_dir="/opt/ml/input"
+    )
     train_dataset = train_dataset.filter(
         lambda x: len(x["prompt"]) + len(x["chosen"]) <= script_args.max_length
         and len(x["prompt"]) + len(x["rejected"]) <= script_args.max_length,
@@ -190,7 +206,11 @@ if __name__ == "__main__":
 
     # 3. Load evaluation dataset
     # in AWS we need to set cache_dir as the user home is not mounted to EBS
-    eval_dataset = get_stack_exchange_paired(data_dir="data/evaluation", cache_dir="/opt/ml/input")
+    eval_dataset = get_data(
+        dataset_name = script_args.dataset_name,
+        data_dir="data/evaluation",
+        cache_dir="/opt/ml/input"
+    )
     eval_dataset = eval_dataset.filter(
         lambda x: len(x["prompt"]) + len(x["chosen"]) <= script_args.max_length
         and len(x["prompt"]) + len(x["rejected"]) <= script_args.max_length,

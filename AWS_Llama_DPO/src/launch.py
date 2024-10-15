@@ -20,7 +20,7 @@ if __name__ == "__main__":
     # set AWS region
     os.environ["AWS_DEFAULT_REGION"] = args.aws_region
 
-    # train
+    # donwload original model
     training_command = [
         "accelerate", "launch", "sft_llama2.py",
         "--output_dir", "./sft",
@@ -37,8 +37,8 @@ if __name__ == "__main__":
         "--warmup_steps", "100",
         "--weight_decay", "0.05",
         "--optim", "paged_adamw_32bit"",
-        "--bf16", "False",
-        "--fp16", "True",
+        "--bf16", "False",                  # AWS EC2 g5 instance do not support bf16
+        "--fp16", "True",                   # AWS EC2 g5 instance support fp16
         "--remove_unused_columns", "False",
         "--run_name", "sft_llama2",
         "--report_to", "none",              # disable WanDB
@@ -47,13 +47,14 @@ if __name__ == "__main__":
     ]
     subprocess.call(training_command)
 
-    # dpo
+    # DPO training
     dpo_command = [
         "accelerate", "launch", "dpo_llama2.py",
         "--model_name_or_path", "sft/final_checkpoint",
         "--output_dir", "dpo",
         "--num_proc", "48",
-        "--report_to", "none"   # disable WanDB
+        "--report_to", "none",   # disable WanDB
+        "--dataset_name", args.dataset_path # s3 location of the training data
     ]
     subprocess.call(dpo_command)
 
@@ -62,7 +63,7 @@ if __name__ == "__main__":
         "python", "merge_peft_adapter.py",
         "--base_model_name", "meta-llama/Llama-2-7b-hf",
         "--adapter_model_name", "dpo/final_checkpoint/",
-        "--output_name", "stack-llama-2"
+        "--output_name", "llama-2-dpo"
     ]
     subprocess.call(merge_command)
 
