@@ -19,6 +19,8 @@ import torch
 from peft import PeftConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification, AutoTokenizer, HfArgumentParser
 
+import os
+import shutils
 
 @dataclass
 class ScriptArguments:
@@ -57,7 +59,10 @@ model.eval()
 
 model = model.merge_and_unload()
 
-model.save_pretrained(f"{script_args.output_name}")
-tokenizer.save_pretrained(f"{script_args.output_name}")
-# We do not push to HuggingFace hub
-# model.push_to_hub(f"{script_args.output_name}", use_temp_dir=False)
+# the /opt/ml/model/ is the default output path for AWS training job
+model.save_pretrained("/opt/ml/model/")
+tokenizer.save_pretrained("/opt/ml/model/")
+
+os.mkdir("/opt/ml/model/code")
+shutil.copyfile("./requirenments.txt", "/opt/ml/model/code/requirenments.txt")
+
