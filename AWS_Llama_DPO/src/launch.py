@@ -52,7 +52,7 @@ if __name__ == "__main__":
     # DPO training
     dpo_command = [
         "accelerate", "launch", "dpo_llama.py",
-        "--model_name_or_path", "sft/final_checkpoint",
+        "--model_name", "sft/final_checkpoint",
         "--output_dir", "dpo",
         "--num_proc", "48",
         "--report_to", "none",                    # disable WanDB

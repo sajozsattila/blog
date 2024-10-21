@@ -165,7 +165,7 @@ if script_args.use_bnb:
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=torch.float16,
     )
 
 base_model = AutoModelForCausalLM.from_pretrained(
@@ -173,7 +173,7 @@ base_model = AutoModelForCausalLM.from_pretrained(
     quantization_config=bnb_config,
     device_map={"": Accelerator().local_process_index},
     trust_remote_code=True,
-    use_auth_token=True,
+    token=True,
 )
 base_model.config.use_cache = False
 
@@ -189,7 +189,7 @@ trainer = SFTTrainer(
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     peft_config=peft_config,
-    max_seq_length=None,
+    max_seq_length=128,
     formatting_func=prepare_sample_text,
     processing_class=tokenizer,
     args=training_args,
