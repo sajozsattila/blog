@@ -1,5 +1,6 @@
 import os
 import datetime
+from typing import List, Dict, Optional, Type
 
 from crewai.utilities.constants import KNOWLEDGE_DIRECTORY
 from langchain_text_splitters import MarkdownHeaderTextSplitter
@@ -11,9 +12,15 @@ from marker.models import create_model_dict
 from marker.output import text_from_rendered
 
 
-# marker-pdf converter
-# Initialize model configuration
-def setup_converter(config):
+def setup_converter(config: Dict[str, Optional[Type]]) -> PdfConverter:
+    """
+    Setup the marker PDF converter with the given configuration.
+
+    Args:
+        config (Dict[str, Optional[Type]]): Configuration dictionary for the converter.
+    Returns:
+
+    """
     # Configure the model with Gemini API or any LLM service (if required)
     artifact_dict = create_model_dict()
 
@@ -38,7 +45,9 @@ headers_to_split_on = [
     ('###', 'Header_3'),
     ('####', 'Header_4'),
 ]
-
+# Create a MarkdownHeaderTextSplitter instance with the specified headers
+# This will split the text based on the specified headers and store them in metadata
+# as 'Header_1', 'Header_2', etc.
 markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on)
 
 def search_pdf(ticker: str):
@@ -85,7 +94,7 @@ def search_pdf(ticker: str):
 
     return content
 
-def datetime_to_quarter(date_time):
+def datetime_to_quarter(date_time: datetime.datetime) -> tuple:
     """
     Converts a given datetime object to the quarter of the year it falls into.
     Args:
@@ -115,7 +124,7 @@ def datetime_to_quarter(date_time):
     # Return the result in 'Qx YYYY' format
     return year, quarter
 
-def get_paragraphs(ticker):
+def get_paragraphs(ticker: str) -> List[Document]:
     """
     Collects paragraphs from the PDF files of a given company ticker.
 
@@ -125,7 +134,6 @@ def get_paragraphs(ticker):
         list: A list of Document objects, each containing a paragraph from the PDF files.
     """
     pdf_texts = search_pdf(ticker=ticker)
-    print(len(pdf_texts))
 
     paragraphs = []
 

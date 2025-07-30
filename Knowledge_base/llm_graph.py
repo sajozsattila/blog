@@ -3,12 +3,13 @@ from pydantic import BaseModel, Field, create_model
 from pyvis.network import Network
 import os
 import pandas as pd
+import hashlib
 
 #########################
 ### Class Definitions ###
 #########################
 
-class Qa_type(BaseModel):
+class QAType(BaseModel):
     """
     Schema for investor QA call section categories
     Attributes:
@@ -124,7 +125,7 @@ class Graph(BaseModel):
 
 
 
-def visualize_graph(graph_documents):
+def visualize_graph(graph_documents: Graph) -> Network:
     """
     Visualizes a knowledge graph using PyVis based on the extracted graph documents.
 
@@ -419,3 +420,147 @@ def pandas_to_sql_types(df: pd.DataFrame) -> dict:
         sql_types[column] = sql_type
 
     return sql_types
+
+
+def add_paragraph_node(graph: Graph, text: str, title: str, filename: str) -> Graph:
+    """
+    Adds a "paragraph" node and a "document" node to the graph. The paragraph node has an attribute "text",
+    and its ID is an MD5 hash of the text. The document node has attributes "title" and "filename".
+    The paragraph node is connected to all other nodes in the graph with a "MENTIONED" relationship,
+    and it is connected to the document node with a "PART_OF" relationship.
+
+    Args:
+        graph (Graph): The input graph to which the paragraph and document nodes will be added.
+        text (str): The text content of the paragraph node.
+        title (str): The title of the document node.
+        filename (str): The filename of the document node.
+
+    Returns:
+        Graph: The updated graph with the new paragraph and document nodes and relationships.
+    """
+    # Compute the MD5 hash of the text to use as the paragraph node ID
+    paragraph_id = hashlib.md5(text.encode('utf-8')).hexdigest()
+
+    # Create the paragraph node
+    paragraph_node = Node(
+        id=paragraph_id,
+        type="Paragraph",
+        properties={"text": text}
+    )
+
+    # Compute the MD5 hash of the filename to use as the document node ID
+    document_id = hashlib.md5(filename.encode('utf-8')).hexdigest()
+
+    # Create the document node
+    document_node = Node(
+        id=document_id,
+        type="Document",
+        properties={"title": title, "filename": filename}
+    )
+
+    # Add the paragraph and document nodes to the graph
+    graph.nodes.append(paragraph_node)
+    graph.nodes.append(document_node)
+
+    # Create a "PART_OF" relationship between the paragraph node and the document node
+    part_of_relationship = Relationship(
+        source=paragraph_id,
+        target=document_id,
+        type="PART_OF",  # Relationship type in uppercase
+        source_type="Paragraph",
+        target_type="Document",
+        properties={}
+    )
+    graph.relationships.append(part_of_relationship)
+
+    # Create "MENTIONED" relationships between the paragraph node and all other nodes
+    for node in graph.nodes:
+        if node.id != paragraph_id and node.id != document_id:  # Avoid self-referencing and document relationships
+            relationship = Relationship(
+                source=paragraph_id,
+                target=node.id,
+                type="MENTIONED",  # Relationship type in uppercase
+                source_type="Paragraph",
+                target_type=node.type,
+                properties={}
+            )
+            graph.relationships.append(relationship)
+
+    return graph
+
+
+def merge_nodes(graph: Graph) -> Graph:
+    """
+    Merges nodes in the graph based on their type and properties. Two nodes are considered the same
+    if their type and properties are identical, regardless of their ID. The output node IDs are
+    computed as an MD5 hash of the node's properties. Relationships are updated to use the new node IDs.
+
+    Args:
+        graph (Graph): The input graph.
+
+    Returns:
+        Graph: The updated graph with merged nodes and updated relationships.
+    """
+    # Dictionary to store unique nodes keyed by (type, properties)
+    unique_nodes = {}
+    new_node_ids = {}
+
+    # Process nodes to merge them
+    for node in graph.nodes:
+        # Create a unique key based on type and properties
+        node_key = (node.type, frozenset(node.properties.items()))
+
+        if node_key not in unique_nodes:
+            # Compute a new ID for the node based on its properties
+            if "name" in node.properties.keys():
+                node_id = node.properties["name"]
+            else:
+                node_id = hashlib.md5(str(node.properties).encode('utf-8')).hexdigest()
+            new_node_ids[node.id] = node_id  # Map old ID to new ID
+
+            # Create a new node with the computed ID
+            unique_nodes[node_key] = Node(
+                id=node_id,
+                type=node.type,
+                properties=node.properties
+            )
+        else:
+            # Map old ID to the existing new ID
+            new_node_ids[node.id] = unique_nodes[node_key].id
+
+    # Update relationships with new node IDs and deduplicate them
+    unique_relationships = set()
+    deduplicated_relationships = []
+
+    for relationship in graph.relationships:
+        # Update the source and target IDs using the new_node_ids mapping
+        try:
+            updated_source = new_node_ids[relationship.source]
+            updated_target = new_node_ids[relationship.target]
+        except Exception as e:
+            print(e)
+            continue
+
+        # Create a unique key for the relationship
+        relationship_key = (updated_source, updated_target, relationship.type)
+
+        if relationship_key not in unique_relationships:
+                unique_relationships.add(relationship_key)
+                deduplicated_relationships.append(
+                    Relationship(
+                        source=updated_source,
+                        target=updated_target,
+                        type=relationship.type,
+                        source_type=relationship.source_type,
+                        target_type=relationship.target_type,
+                        properties=relationship.properties
+                    )
+                )
+
+    # Create the updated graph
+    merged_graph = Graph(
+        nodes=list(unique_nodes.values()),
+        relationships=deduplicated_relationships
+    )
+
+    return merged_graph
