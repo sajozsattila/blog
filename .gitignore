@@ -1,1 +1,13 @@
 /Knowledge_base/openrouter_key.txt
+/Knowledge_base/phoenix_key.txt
+/Knowledge_base/prompts/.ipynb_checkpoints/
+/Knowledge_base/knowledge/.ipynb_checkpoints/
+/Knowledge_base/.ipynb_checkpoints/
+Knowledge_base/__pycache__
+/HybridRAG/.knowledge_milvus.db.lock
+/HybridRAG/knowledge_milvus.db
+/HybridRAG/openrouter_key.txt
+/HybridRAG/phoenix_key.txt
+/HybridRAG/prompts/.ipynb_checkpoints/
+/HybridRAG/knowledge/.ipynb_checkpoints/
+/HybridRAG/.ipynb_checkpoints/
