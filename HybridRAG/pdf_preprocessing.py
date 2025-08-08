@@ -151,7 +151,7 @@ def get_paragraphs(ticker: str) -> List[Document]:
             headers = ''
             for i in range(1, 5):
                 if f'Header_{i}' in result.metadata:
-                    headers = '#' + f" {result.metadata[f'Header_{i}']}\n\n"
+                    headers = '# ' + f" {result.metadata[f'Header_{i}']}\n\n"
             this_document = Document(
                 page_content=headers + result.page_content,
                 metadata={
