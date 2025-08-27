@@ -1,6 +1,7 @@
 import os
 import datetime
 from typing import List, Dict, Optional, Type
+import re
 
 from crewai.utilities.constants import KNOWLEDGE_DIRECTORY
 from langchain_text_splitters import MarkdownHeaderTextSplitter
@@ -146,7 +147,21 @@ def get_paragraphs(ticker: str) -> List[Document]:
         text_type = k.split('_')[3]
 
         md_header_splits = markdown_splitter.split_text(text)
-        print(md_header_splits[0])
+        if len(md_header_splits) < 5:
+            blank_line_regex = r"(?:\r?\n){2,}"
+            # the generated Markdown seems do not have headers, so we split by paragraphs
+            new_md_header_splits = []
+            for head in md_header_splits:
+                # for p in re.split(blank_line_regex, head.page_content.strip()):
+                for p in head.page_content.strip().split("\n"):
+                    new_md_header_splits.append(
+                        Document(
+                            page_content=p,
+                            metadata=head.metadata
+                        )
+                    )
+            # overwrite the original Markdown split
+            md_header_splits = new_md_header_splits
         for result in md_header_splits:
             headers = ''
             for i in range(1, 5):
