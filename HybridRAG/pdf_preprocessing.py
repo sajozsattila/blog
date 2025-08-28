@@ -6,6 +6,9 @@ import re
 from crewai.utilities.constants import KNOWLEDGE_DIRECTORY
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_core.documents import Document
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from marker.config.parser import ConfigParser
 from marker.converters.pdf import PdfConverter
@@ -125,15 +128,76 @@ def datetime_to_quarter(date_time: datetime.datetime) -> tuple:
     # Return the result in 'Qx YYYY' format
     return year, quarter
 
-def get_paragraphs(ticker: str) -> List[Document]:
+def get_paragraphs(
+    ticker: str, 
+    max_lenght: int = 5000, 
+    splitter: str = "Semantic", 
+    **kwargs
+) -> List[Document]:
     """
     Collects paragraphs from the PDF files of a given company ticker.
 
     Args:
         ticker (str): The stock ticker symbol of the company to search for.
+        max_lenght (int): The maximum characters length of one paragraph
+        splitter (str): how we split the paragraphs if they too long, default: "Semantic", Valid: "Semantic"
+        **kwargs: Additional arguments for the SemanticChunker, such as:
+            - model_name (str): The name of the model to use for embeddings.
+            - breakpoint_threshold_type (str): The type of breakpoint threshold. Valid: "standard_deviation", "percentile".
+            - breakpoint_threshold_amount (float): The amount for the breakpoint threshold.
+
     Returns:
         list: A list of Document objects, each containing a paragraph from the PDF files.
     """
+    valid_splitters = ["Semantic", "RecursiveCharacter"]
+    if splitter not in valid_splitters:
+        raise ValueError(f"{splitter} is not a valid splitter! Valid values are: {valid_splitters.strip('[]')}")
+    
+    if splitter == "Semantic":
+        # Extract kwargs with defaults
+        model_name = kwargs.get("model_name", "FinLang/finance-embeddings-investopedia")
+        breakpoint_threshold_type = kwargs.get("breakpoint_threshold_type", "percentile")
+        breakpoint_threshold_amount = kwargs.get("breakpoint_threshold_amount", 70.0)
+
+        # check settings
+        valid_breakpoint_threshold_type = ["standard_deviation", "percentile", "interquartile"]
+        if breakpoint_threshold_type not in valid_breakpoint_threshold_type:
+            raise ValueError(
+                f"{breakpoint_threshold_type} is not a valid splitter! Valid values are: {valid_breakpoint_threshold_type.strip('[]')}"
+            )
+        if breakpoint_threshold_type == "percentile":
+            if breakpoint_threshold_amount < 1 or breakpoint_threshold_amount > 99:
+                raise ValueError(f"The breakpoint_threshold_amount should be between 1 and 99! Current value: {breakpoint_threshold_amount}")
+            breakpoint_threshold_amount = int(breakpoint_threshold_amount)
+        elif breakpoint_threshold_type == "standard_deviation":
+            if breakpoint_threshold_amount < 0:
+                raise ValueError(f"The breakpoint_threshold_amount should be possitive! Current value: {breakpoint_threshold_amount}")
+        elif breakpoint_threshold_type == "interquartile":
+            if breakpoint_threshold_amount < 0:
+                raise ValueError(f"The breakpoint_threshold_amount should be possitive! Current value: {breakpoint_threshold_amount}")
+
+        # Initialize a semantic chunk splitter using OpenAI embeddings.
+        text_splitter = SemanticChunker(
+            HuggingFaceEmbeddings(
+                model_name=model_name
+            ),
+            # Set the split breakpoint type to percentile
+            breakpoint_threshold_type=breakpoint_threshold_type,
+            breakpoint_threshold_amount=breakpoint_threshold_amount,
+        )
+    elif splitter == "RecursiveCharacter":
+        chunk_size = kwargs.get("chunk_size", 2000)
+        chunk_overlap = kwargs.get("chunk_overlap", 250)
+        
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            # Specifies a function to calculate the length of the string.
+            length_function=len,
+            # Sets whether to use regular expressions as delimiters.
+            is_separator_regex=False,
+        )
+    
     pdf_texts = search_pdf(ticker=ticker)
 
     paragraphs = []
@@ -147,39 +211,32 @@ def get_paragraphs(ticker: str) -> List[Document]:
         text_type = k.split('_')[3]
 
         md_header_splits = markdown_splitter.split_text(text)
-        if len(md_header_splits) < 5:
-            blank_line_regex = r"(?:\r?\n){2,}"
-            # the generated Markdown seems do not have headers, so we split by paragraphs
-            new_md_header_splits = []
-            for head in md_header_splits:
-                # for p in re.split(blank_line_regex, head.page_content.strip()):
-                for p in head.page_content.strip().split("\n"):
-                    new_md_header_splits.append(
-                        Document(
-                            page_content=p,
-                            metadata=head.metadata
-                        )
-                    )
-            # overwrite the original Markdown split
-            md_header_splits = new_md_header_splits
+
         for result in md_header_splits:
-            headers = ''
-            for i in range(1, 5):
-                if f'Header_{i}' in result.metadata:
-                    headers = '# ' + f" {result.metadata[f'Header_{i}']}\n\n"
-            this_document = Document(
-                page_content=headers + result.page_content,
-                metadata={
-                    'filename': k,
-                    'reporting_year_start': reporting_start_year,
-                    'reporting_quarter_start': reporting_start_quarter,
-                    'reporting_year_end': reporting_end_year,
-                    'reporting_quarter_end': reporting_end_quarter,
-                    'document_type': text_type,
-                    'source': ticker,
-                    **result.metadata
-                }
-            )
-            paragraphs.append(this_document)
+            this_paragraph = []
+            if len(result.page_content) > max_lenght:
+                # too long paragraph so we split them
+                this_paragraph = text_splitter.split_text(result.page_content)
+            else:
+                this_paragraph.append(result.page_content)
+            for this_split in this_paragraph:
+                headers = ''
+                for i in range(1, 5):
+                    if f'Header_{i}' in result.metadata:
+                        headers = '# ' + f" {result.metadata[f'Header_{i}']}\n\n"
+                this_document = Document(
+                    page_content=headers + this_split,
+                    metadata={
+                        'filename': k,
+                        'reporting_year_start': reporting_start_year,
+                        'reporting_quarter_start': reporting_start_quarter,
+                        'reporting_year_end': reporting_end_year,
+                        'reporting_quarter_end': reporting_end_quarter,
+                        'document_type': text_type,
+                        'source': ticker,
+                        **result.metadata
+                    }
+                )
+                paragraphs.append(this_document)
 
     return paragraphs
