@@ -4,6 +4,7 @@ from typing import List, Dict, Optional, Type
 import re
 
 from crewai.utilities.constants import KNOWLEDGE_DIRECTORY
+from langchain_openai import ChatOpenAI
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
@@ -14,6 +15,9 @@ from marker.config.parser import ConfigParser
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.output import text_from_rendered
+
+# from https://github.com/FullStackRetrieval-com/RetrievalTutorials/blob/d2da20552446179779c74ccc9e232e77ba981659/agentic_chunker.py
+from agentic_chunker import AgenticSplitter
 
 
 def setup_converter(config: Dict[str, Optional[Type]]) -> PdfConverter:
@@ -128,6 +132,46 @@ def datetime_to_quarter(date_time: datetime.datetime) -> tuple:
     # Return the result in 'Qx YYYY' format
     return year, quarter
 
+def define_llm(model_name: str="qwen/qwen3-30b-a3b:free") -> ChatOpenAI:
+    """
+    Create an LLM model
+
+    Args:
+        model_name (str): name of the model, if it is start with mlx-community, we use a MLX model otherwise we search for OpenRouter model
+    Return:
+        ChatOpenAI: the LLM model
+    """
+    ## LLM Model
+    # we use MLX_LLM in the background
+    if "mlx-community" in model_name:
+        print("mlx-model")
+        # local models
+        # model_name = 'mlx-community/Meta-Llama-3.1-8B-Instruct-4bit'
+        # 8 bit cab fit in M4 memmory but seems the 4bit enough for our task
+        # so do not justfly the double memory usage
+        # model_name = 'mlx-community/Meta-Llama-3.1-8B-Instruct-8bit')
+        # model_name = 'mlx-community/Qwen3-8B-6bit'
+        # model_name = 'mlx-community/gemma-3-12b-it-4bit-DWQ')
+
+        api_key = "nem_kell"
+
+        base_url = "http://localhost:8000/v1"
+    else:
+        print(f"Openrouter model {model_name}")
+        with open('openrouter_key.txt', 'r') as file:
+            api_key = file.read()
+
+        base_url = "https://openrouter.ai/api/v1"
+
+    llm = ChatOpenAI(
+        temperature=0, 
+        model_name=model_name, 
+        openai_api_base=base_url,
+        api_key=api_key
+    )
+
+    return llm
+
 def get_paragraphs(
     ticker: str, 
     max_lenght: int = 5000, 
@@ -149,7 +193,7 @@ def get_paragraphs(
     Returns:
         list: A list of Document objects, each containing a paragraph from the PDF files.
     """
-    valid_splitters = ["Semantic", "RecursiveCharacter"]
+    valid_splitters = ["Semantic", "RecursiveCharacter", "Agentic"]
     if splitter not in valid_splitters:
         raise ValueError(f"{splitter} is not a valid splitter! Valid values are: {valid_splitters.strip('[]')}")
     
@@ -197,6 +241,14 @@ def get_paragraphs(
             # Sets whether to use regular expressions as delimiters.
             is_separator_regex=False,
         )
+    elif splitter == "Agentic":
+        model_name = kwargs.get("model_name", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")
+        max_chunk_size = kwargs.get("max_chunk_size", 5)
+        
+        # define the splitter
+        llm = define_llm(model_name)
+        text_splitter = AgenticSplitter(llm=llm, max_chunk_size=max_chunk_size)
+        
     
     pdf_texts = search_pdf(ticker=ticker)
 

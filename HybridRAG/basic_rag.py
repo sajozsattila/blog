@@ -1,113 +1,9 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-from phoenix.otel import register
-from openinference.instrumentation.openai import OpenAIInstrumentor
-import os
-from opentelemetry.trace import Status, StatusCode
-from openinference.semconv.trace import SpanAttributes
-
-project_name = "Basic_RAG"
-
-# Add Phoenix API Key for tracing
-phoenix_key = ''
-with open('phoenix_key.txt', 'r') as file:
-    phoenix_key = file.read()
-os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={phoenix_key}"
-os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = "https://app.phoenix.arize.com"
-os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={phoenix_key}";
-os.environ['PHOENIX_PROJECT_NAME'] = project_name
-
-# configure the Phoenix tracer
-tracer_provider = register(
-  project_name=project_name, # Default is 'default'
-  auto_instrument=True # Auto-instrument your app based on installed OI dependencies
-)
-
-OpenAIInstrumentor().instrument(tracer_provider = tracer_provider)
-tracer = tracer_provider.get_tracer(__name__)
-
+# lib imports
 import json
 from time import sleep
-from pybars import Compiler
-import yaml
-from typing import Callable
-
-from langchain_openai import ChatOpenAI
-
-from mlx_lm import load, generate
-
-# import own utility functions
-from pdf_preprocessing import *
-
-
-# settings
-model_type = "openrouter"
-ticker = 'BHP'
-ticker_profile = "BHP Group Limited operates as a resources company in Australia, Europe, China, Japan, India, South Korea, the rest of Asia, North America, South America, and internationally. The company operates through Copper, Iron Ore, and Coal segments. It engages in the mining of copper, uranium, gold, zinc, lead, molybdenum, silver, iron ore, cobalt, and metallurgical and energy coal. The company is also involved in the mining, smelting, and refining of nickel, as well as potash development activities. In addition, it provides towing, freight, marketing and trading, marketing support, finance, administrative, and other services. The company was founded in 1851 and is headquartered in Melbourne, Australia."
-version = '1.0.0'
-test = False
-
-# Cut the input text to paragraph, if False it will cut to PDF pages
-cut_in_paragraph = False
-template_file_path = './prompts'
-
-
-# # LLM Model
-
-# In[3]:
-
-
-# we use MLX_LLM in the background
-
-if model_type == "mlx":
-    # local models
-    model_name = 'mlx-community/Meta-Llama-3.1-8B-Instruct-4bit'
-    # 8 bit cab fit in M4 memmory but seems the 4bit enough for our task
-    # so do not justfly the double memory usage
-    # model_name = 'mlx-community/Meta-Llama-3.1-8B-Instruct-8bit')
-    # model_name = 'mlx-community/Qwen3-8B-6bit'
-    # model_name = 'mlx-community/gemma-3-12b-it-4bit-DWQ')
-
-    api_key = "nem_kell"
-
-    base_url = "http://localhost:8000/v1"
-elif model_type == "openrouter":
-    # openrouter models
-    model_name = "qwen/qwen3-30b-a3b:free"
-
-    with open('openrouter_key.txt', 'r') as file:
-        api_key = file.read()
-
-    base_url = "https://openrouter.ai/api/v1"
-
-
-# In[4]:
-
-
-llm = ChatOpenAI(
-    temperature=0, 
-    model_name=model_name, 
-    openai_api_base=base_url,
-    api_key=api_key
-)
-
-
-# # Read data
-# 
-# Read PDF financial reports and process them to Langchain Documents
-
-# In[5]:
-
-
-paragraphs = get_paragraphs(ticker)
-
-
-# # CrewAI knowedge
-
-# In[6]:
-
-
 from crewai.knowledge.storage.knowledge_storage import KnowledgeStorage
 from crewai.utilities.paths import db_storage_path
 from langchain_milvus import Milvus
@@ -116,11 +12,22 @@ import pymilvus
 from pymilvus import model as pymilvus_model
 import hashlib
 import sys
-
 from typing import Any, Dict, List, Optional, Union, cast
+from mlx_lm import load, generate
+from openinference.semconv.trace import SpanAttributes
+from opentelemetry.trace import Status, StatusCode
+from phoenix.otel import register
+from openinference.instrumentation.openai import OpenAIInstrumentor
 
+# import own utility functions
+from pdf_preprocessing import *
+from agentic_chunker import load_template
 
-# In[7]:
+# settings
+version = '1.1.0'
+test = False
+# Cut the input text to paragraph, if False it will cut to PDF pages
+cut_in_paragraph = False
 
 
 class MilvusKnowledgeStorage:
@@ -373,49 +280,27 @@ if test:
 
 # # Implement RAG
 
-# In[9]:
-
-
-def load_template(filename: str) -> Callable:
-    """
-    Load a prompt template from a YAML file.
-
-    Args:
-        filename (str): The name of the YAML file containing the prompt template.
-    Returns:
-        Callable: A callable function that takes a dictionary of parameters and returns a formatted prompt.
-    Raises:
-        ValueError: If the specified file does not exist or is not a valid file.
-    """
-    # open file
-    prompt_file = os.path.join(template_file_path, filename)
-    # test file exist
-    if not os.path.isfile(prompt_file):
-        raise ValueError(f"{prompt_file} not a valid file")
-    with open(prompt_file) as file:
-        source = yaml.safe_load(file)
-
-    compiler = Compiler()
-    # Compile the system template
-    prompt_template = compiler.compile(source['prompt_template'])
-
-    return prompt_template
-
-
-# In[10]:
-
 
 class MyRAG:
     """
     A simple RAG implementation that uses Milvus as a knowledge base.
     """
-    def __init__(self, data: List[Document]=None):
+    def __init__(
+        self, 
+        tracer=None,
+        data: List[Document]=None, 
+        model_name: str="qwen/qwen3-30b-a3b:free",
+    ):
         """
         Initializes the MyRAG instance with the provided data.
         Args:
+            tracer: the openinference tracer
             data (List[Document]): A list of Langchain Document objects containing the knowledge base.
+            model_name (str): a LLM model name
 
         """
+        self.tracer = tracer
+        self.model_name = model_name
         # Initialize Milvus DB
         self.knowledge = MilvusKnowledgeStorage()
 
@@ -429,6 +314,9 @@ class MyRAG:
         # system prompt
         system_prompt_template = load_template("basic_rag_system.yaml")
         self.system_prompt = system_prompt_template({})
+
+        # LLM
+        self.llm = define_llm(model_name)
 
     def invoke(self, question: str) -> str:
         """
@@ -461,21 +349,29 @@ class MyRAG:
             ('user', user_prompt)
         ]
 
-        with tracer.start_as_current_span("basic_rag") as child_span:
-            child_span.set_attribute(SpanAttributes.INPUT_VALUE, context)
-            child_span.set_attribute(SpanAttributes.LLM_MODEL_NAME, model_name)
+        if self.tracer is not None:
+            print("tracing")
+            # set up tracing
+            with self.tracer.start_as_current_span("rag_invoke") as child_span:
+                child_span.set_attribute(SpanAttributes.INPUT_VALUE, context)
+                child_span.set_attribute(SpanAttributes.LLM_MODEL_NAME, self.model_name)
 
+                try:
+                    rag_answer = self.llm.invoke(messages).content
+                except Exception as e:
+                    child_span.set_attribute(SpanAttributes.OUTPUT_VALUE, str(e))
+                    child_span.set_status(Status(StatusCode.ERROR))
+                    return f"Error in LLM invocation: {f}"
+
+                child_span.set_attribute(SpanAttributes.OUTPUT_VALUE, rag_answer)
+                child_span.set_status(Status(StatusCode.OK))
+                return rag_answer
+        else:
             try:
-                rag_answer = llm.invoke(messages).content
+                rag_answer = self.llm.invoke(messages).content
+                return rag_answer
             except Exception as e:
-                child_span.set_attribute(SpanAttributes.OUTPUT_VALUE, str(e))
-                child_span.set_status(Status(StatusCode.ERROR))
-                return f"Error in LLM invocation: {f}"
-
-
-            child_span.set_attribute(SpanAttributes.OUTPUT_VALUE, rag_answer)
-            child_span.set_status(Status(StatusCode.OK))
-            return rag_answer
+                return f"Error in LLM invocation: {e}"
 
 
 
