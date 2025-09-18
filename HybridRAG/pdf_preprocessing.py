@@ -16,8 +16,7 @@ from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.output import text_from_rendered
 
-# from https://github.com/FullStackRetrieval-com/RetrievalTutorials/blob/d2da20552446179779c74ccc9e232e77ba981659/agentic_chunker.py
-from agentic_chunker import AgenticSplitter
+from agentic_chunker import LLMSemanticChunker
 
 
 def setup_converter(config: Dict[str, Optional[Type]]) -> PdfConverter:
@@ -175,7 +174,8 @@ def define_llm(model_name: str="qwen/qwen3-30b-a3b:free") -> ChatOpenAI:
 def get_paragraphs(
     ticker: str, 
     max_lenght: int = 5000, 
-    splitter: str = "Semantic", 
+    splitter: str = "Semantic",
+    markdown_presplit: bool=True,
     **kwargs
 ) -> List[Document]:
     """
@@ -185,6 +185,7 @@ def get_paragraphs(
         ticker (str): The stock ticker symbol of the company to search for.
         max_lenght (int): The maximum characters length of one paragraph
         splitter (str): how we split the paragraphs if they too long, default: "Semantic", Valid: "Semantic"
+        markdown_presplit (bool): split the text before by markdown, default id True
         **kwargs: Additional arguments for the SemanticChunker, such as:
             - model_name (str): The name of the model to use for embeddings.
             - breakpoint_threshold_type (str): The type of breakpoint threshold. Valid: "standard_deviation", "percentile".
@@ -242,12 +243,12 @@ def get_paragraphs(
             is_separator_regex=False,
         )
     elif splitter == "Agentic":
-        model_name = kwargs.get("model_name", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit")
-        max_chunk_size = kwargs.get("max_chunk_size", 5)
+        model_name = kwargs.get("model_name", "qwen/qwen3-30b-a3b:free")
+        max_content = kwargs.get("max_content", 50)
         
         # define the splitter
         llm = define_llm(model_name)
-        text_splitter = AgenticSplitter(llm=llm, max_chunk_size=max_chunk_size)
+        text_splitter = LLMSemanticChunker(llm=llm, max_content=max_content)
         
     
     pdf_texts = search_pdf(ticker=ticker)
@@ -262,22 +263,40 @@ def get_paragraphs(
         reporting_end_year, reporting_end_quarter = datetime_to_quarter(report_end_time)
         text_type = k.split('_')[3]
 
-        md_header_splits = markdown_splitter.split_text(text)
+        if markdown_presplit:
+            md_header_splits = markdown_splitter.split_text(text)
 
-        for result in md_header_splits:
-            this_paragraph = []
-            if len(result.page_content) > max_lenght:
-                # too long paragraph so we split them
-                this_paragraph = text_splitter.split_text(result.page_content)
-            else:
-                this_paragraph.append(result.page_content)
-            for this_split in this_paragraph:
-                headers = ''
-                for i in range(1, 5):
-                    if f'Header_{i}' in result.metadata:
-                        headers = '# ' + f" {result.metadata[f'Header_{i}']}\n\n"
+            for result in md_header_splits:
+                this_paragraph = []
+                if len(result.page_content) > max_lenght:
+                    # too long paragraph so we split them
+                    this_paragraph = text_splitter.split_text(result.page_content)
+                else:
+                    this_paragraph.append(result.page_content)
+                for this_split in this_paragraph:
+                    headers = ''
+                    for i in range(1, 5):
+                        if f'Header_{i}' in result.metadata:
+                            headers = '# ' + f" {result.metadata[f'Header_{i}']}\n\n"
+                    this_document = Document(
+                        page_content=headers + this_split,
+                        metadata={
+                            'filename': k,
+                            'reporting_year_start': reporting_start_year,
+                            'reporting_quarter_start': reporting_start_quarter,
+                            'reporting_year_end': reporting_end_year,
+                            'reporting_quarter_end': reporting_end_quarter,
+                            'document_type': text_type,
+                            'source': ticker,
+                            **result.metadata
+                        }
+                    )
+                    paragraphs.append(this_document)
+        else:
+            documents = text_splitter.split_text(text)
+            for document in documents:
                 this_document = Document(
-                    page_content=headers + this_split,
+                    page_content=document,
                     metadata={
                         'filename': k,
                         'reporting_year_start': reporting_start_year,
@@ -286,9 +305,9 @@ def get_paragraphs(
                         'reporting_quarter_end': reporting_end_quarter,
                         'document_type': text_type,
                         'source': ticker,
-                        **result.metadata
                     }
                 )
                 paragraphs.append(this_document)
+            
 
     return paragraphs

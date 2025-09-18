@@ -12,22 +12,49 @@ import pymilvus
 from pymilvus import model as pymilvus_model
 import hashlib
 import sys
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Dict, List, Optional, Union, cast, Callable
 from mlx_lm import load, generate
 from openinference.semconv.trace import SpanAttributes
 from opentelemetry.trace import Status, StatusCode
 from phoenix.otel import register
 from openinference.instrumentation.openai import OpenAIInstrumentor
+import yaml
+from pybars import Compiler
 
 # import own utility functions
 from pdf_preprocessing import *
-from agentic_chunker import load_template
 
 # settings
 version = '1.1.0'
 test = False
 # Cut the input text to paragraph, if False it will cut to PDF pages
 cut_in_paragraph = False
+
+def load_template(filename: str, template_file_path: str="./prompts") -> Callable:
+    """
+    Load a prompt template from a YAML file.
+
+    Args:
+        filename (str): The name of the YAML file containing the prompt template.
+        template_file_path (str): OS path for the templates files
+    Returns:
+        Callable: A callable function that takes a dictionary of parameters and returns a formatted prompt.
+    Raises:
+        ValueError: If the specified file does not exist or is not a valid file.
+    """
+    # open file
+    prompt_file = os.path.join(template_file_path, filename)
+    # test file exist
+    if not os.path.isfile(prompt_file):
+        raise ValueError(f"{prompt_file} not a valid file")
+    with open(prompt_file) as file:
+        source = yaml.safe_load(file)
+
+    compiler = Compiler()
+    # Compile the system template
+    prompt_template = compiler.compile(source['prompt_template'])
+
+    return prompt_template
 
 
 class MilvusKnowledgeStorage:
